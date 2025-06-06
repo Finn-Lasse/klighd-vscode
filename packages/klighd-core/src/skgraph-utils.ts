@@ -24,7 +24,7 @@ import {
     SModelRootImpl,
 } from 'sprotty'
 import { Bounds } from 'sprotty-protocol'
-import { isProxyRendering } from './proxy-view/proxy-view-util'
+import { isProxyRendering } from './proxy-view copy/proxy-view-util'
 import {
     isContainerRendering,
     isPolyline,

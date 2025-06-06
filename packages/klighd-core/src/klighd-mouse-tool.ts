@@ -18,7 +18,7 @@
 import { injectable } from 'inversify'
 import { VNode } from 'snabbdom'
 import { MouseListener, MouseTool, SModelElementImpl, SModelRootImpl, on } from 'sprotty'
-import { PROXY_SUFFIX, isProxy } from './proxy-view/proxy-view-util'
+import { PROXY_SUFFIX, isProxy } from './proxy-view copy/proxy-view-util'
 /* global Element, MouseEvent */
 
 @injectable()
