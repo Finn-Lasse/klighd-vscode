@@ -509,10 +509,18 @@ export function getProxyId(id: string): string {
     return id.endsWith(PROXY_SUFFIX) ? id : id + PROXY_SUFFIX
 }
 
+// /** Removes {@link PROXY_SUFFIX} from the given id if the given id is a proxy's id. */
+// export function getNodeId(id: string): string {
+//     return id.endsWith(PROXY_SUFFIX) ? id.substring(0, id.length - PROXY_SUFFIX.length) : id
+// }
+
 /** Removes {@link PROXY_SUFFIX} from the given id if the given id is a proxy's id. */
 export function getNodeId(id: string): string {
-    return id.endsWith(PROXY_SUFFIX) ? id.substring(0, id.length - PROXY_SUFFIX.length) : id
+    const re = /\$proxy\d+$/
+    const match = id.match(re)
+    return match ? id.substring(0, id.length - match[0].length) : id
 }
+
 
 /**
  * Checks if `b1` is (partially) in `b2`.

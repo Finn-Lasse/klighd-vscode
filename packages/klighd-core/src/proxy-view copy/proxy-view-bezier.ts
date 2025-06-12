@@ -1,4 +1,5 @@
 import { Bounds } from "sprotty-protocol";
+import { SKEdge, SKNode } from "../skgraph-models";
 
 const {cos, sin, acos, atan2, sqrt, pow } = Math;
 const pi = Math.PI
@@ -101,7 +102,7 @@ function roots(points: Point[], line: Line) {
     }
 }
 
-function computeCubic(t: number, p: Point[]) {
+export function computeCubic(t: number, p: Point[]) {
 
     const mt = 1 - t;
 
@@ -120,40 +121,22 @@ export function getValueAt(value: number, points: Point[], axis = 0) {
 
     const xcoords = points.map(p => ({x:p.y - value , y: p.x - value}));
 
-    console.log(xcoords)
-
-    //Herausfinden, warum
     let line = { p1: { x: 0, y: 0 }, p2: { x: 1, y: 0} }
     if (axis == 1){
         line = { p1: { x: 0, y: 0 }, p2: { x: 0, y: 1} }
     }
     let root = roots(xcoords, line);
 
-    console.log(root)
-
-    const values = []
+    const result : {point : Point, t : number}[] = []
 
     for (const t of root){
-        if (axis == 1){
-            values.push(computeCubic(t, points))
-        }else{
-            values.push(computeCubic(t, points))
-        }
+        const point : Point = computeCubic(t, points)
+        result.push({ point , t })
     }
 
-    return values
+    return result
 };
 
-// let coords = [
-//         { x: 62, y: 183 },
-//         { x: 30, y: 20 },
-//         { x: 201, y: 256 },
-//         { x: 176, y: 94 }
-//     ]
-
-// console.log(getValueAt(140, coords, 1))
-
-// getboundsFromPoints([{ x: 62, y: 183 }])
 
 export function getBoundsFromPoints(points: Point[]): Bounds{
     const xarr = points.map((p) => p.x);
@@ -166,4 +149,17 @@ export function getBoundsFromPoints(points: Point[]): Bounds{
 
     return {x:xmin, y : ymin, width : xmax - xmin, height : ymax - ymin}
 }
+
+export interface CrossingPoint{
+	point:Point,
+	incoming: Boolean,
+	node?: SKNode,
+	nodeBounds?: Bounds
+}
+
+export interface Crossing{
+	edge: SKEdge
+	crossingPoints: CrossingPoint[]
+}
+
 
