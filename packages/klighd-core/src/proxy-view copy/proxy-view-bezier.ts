@@ -150,15 +150,37 @@ export function getBoundsFromPoints(points: Point[]): Bounds{
     return {x:xmin, y : ymin, width : xmax - xmin, height : ymax - ymin}
 }
 
+export enum Sides {
+	N = "N",
+	E = "E",
+	S = "S",
+	W = "W"
+}
+
+export enum Anchors {
+	towardsMiddle = "towardsMiddle",
+    center = "center",
+    towardsEdge = "towardsEdge",
+	topLeft = "topLeft"
+}
+
+
 export interface CrossingPoint{
 	point:Point,
 	incoming: Boolean,
-	node?: SKNode,
-	nodeBounds?: Bounds
+	section: number,
+	side: Sides,
+	proxyPoint: Point,
+	node: SKNode,
+	nodeBounds: Bounds,
+	anchor: Anchors
+
 }
 
 export interface Crossing{
 	edge: SKEdge
+	pointBounds: Bounds[]
+	bezierPoints: Point[][]
 	crossingPoints: CrossingPoint[]
 }
 

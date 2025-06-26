@@ -42,14 +42,10 @@ import { ProxyFilter, ProxyFilterAndID } from './filters/proxy-view-filters'
 import { SendProxyViewAction, ShowProxyViewAction } from './proxy-view-actions'
 import {
     ProxyViewCapScaleToOne,
-    ProxyViewDecreaseProxyClutter,
-    ProxyViewEnableEdgeProxies,
     ProxyViewEnabled,
     ProxyViewHighlightSelected,
     ProxyViewInteractiveProxies,
     ProxyViewOriginalNodeScale,
-    ProxyViewShowProxiesEarly,
-    ProxyViewShowProxiesEarlyNumber,
     ProxyViewSize,
     ProxyViewTitleScaling,
     ProxyViewTransparentEdges,
@@ -72,7 +68,10 @@ import{
     getBoundsFromPoints,
     getValueAt,
     Crossing,
-    computeCubic
+    CrossingPoint,
+    computeCubic,
+    Sides,
+    Anchors
 } from './proxy-view-bezier'
 /* global document, HTMLElement, MouseEvent */
 
@@ -179,12 +178,6 @@ export class ProxyView extends AbstractUIExtension {
     /** @see {@link ProxyViewUseSynthesisProxyRendering} */
     private useSynthesisProxyRendering: boolean
 
-    /** @see {@link ProxyViewShowProxiesEarly} */
-    private showProxiesEarly: boolean
-
-    /** @see {@link ProxyViewShowProxiesEarlyNumber} */
-    private showProxiesEarlyNumber: number
-
     /** @see {@link ProxyViewTransparentEdges} */
     private transparentEdges: boolean
 
@@ -273,43 +266,26 @@ export class ProxyView extends AbstractUIExtension {
         const canvasVRF = Canvas.translateCanvasToVRF(canvas)
         const canvasCRF = Canvas.translateCanvasToCRF(canvas)
 
-        // Calculate size of proxies
-        const size = Math.min(canvasVRF.width, canvasVRF.height) * this.sizePercentage
-
-        const fromPercent = 0.01
-        // The amount of pixels to offset the CRF canvas size by 1%.
-        const onePercentOffsetCRF = Math.min(canvasCRF.width, canvasCRF.height) * fromPercent
-
         /// / Initial nodes ////
-        // Reduce canvas size to show proxies early
-        const sizedCanvas = this.showProxiesEarly
-            ? Canvas.offsetCanvas(canvasCRF, this.showProxiesEarlyNumber * onePercentOffsetCRF)
-            : canvasCRF
 
-        const crossingEdges = this.getPossibleEdges(root, sizedCanvas)
+        const crossingEdges = this.getPossibleEdges(root, canvasCRF)
 
-        const crossings = this.getCrossings(crossingEdges, sizedCanvas)
+        const crossings = this.getCrossings(crossingEdges, canvasCRF, ctx)
 
-        const crossingsWithNode = this.getCorrespondingCrossingNodes(crossings)
+        this.updateProxyPlacementPoints(crossings, canvasCRF)
+ 
+        this.applyAnchors(crossings, canvasCRF)
 
-        const crossingsNodeBounds = this.getCorrespondingSynthesis(crossingsWithNode, ctx)
+        const filteredOverlaps = this.filterOverlappingWithNodes(crossings, root, canvasCRF)
 
-        const crossingsWithTransform = this.getCrossingTransform(crossingsNodeBounds, size, canvasVRF)
-
-
-        // if (crossingEdges.length > 5000){
-        //     console.log(crossingEdges.length)
-        //     console.log(crossings)
-        //     // console.log(crossingsWithNode)
-        // }
-
+        this.getCrossingTransform(filteredOverlaps, canvasVRF)
 
         const proxies = []
         this.currProxies = []
 
         let idNr = 1
         // Nodes
-        for (const crossing of crossingsWithTransform) {
+        for (const crossing of filteredOverlaps) {
             for (const cp of crossing.crossingPoints){
                 // Create a proxy
                 const transform = cp.nodeBounds as TransformAttributes
@@ -325,7 +301,6 @@ export class ProxyView extends AbstractUIExtension {
             }
         }
 
-
         // Clear caches for the next model
         this.clearDistances()
 
@@ -333,90 +308,131 @@ export class ProxyView extends AbstractUIExtension {
     }
 
 
-    /**
-     * Calculates the TransformAttributes for this node's proxy, e.g. the position to place the proxy at aswell as its scale and bounds.
-     * Note that the position is pre-scaling. To get position post-scaling, divide `x` and `y` by `scale`.
-     */
-    private getTransform(node: SKNode, point: Point, desiredSize: number, proxyBounds: Bounds, canvas: Canvas): TransformAttributes {
+    private filterOverlappingWithNodes(crossings: Crossing[], root: SKNode, canvasCRF: Canvas): Crossing[]{
+        const nodes = this.getTreeDepths(root)
+        const result = []
+
+        for (const crossing of crossings){
+            const edge = crossing.edge
+            let depth
+            if (edge.target instanceof SKNode && edge.source instanceof SKNode){
+                const depthTarget = this.getDepth(edge.target, root)
+                const depthSource = this.getDepth(edge.source, root)
+                depth = Math.max(depthSource, depthTarget)
+            }
+
+            const filtered = []
+            for (const cp of crossing.crossingPoints){
+                depth ??= this.getDepth(cp.node, root)
+                let foundOverlap = false
+                for (let i = depth; i < nodes.length && !foundOverlap; i++){
+                    const {proxyWidth, proxyHeight} = this.transformWidthHeight(cp.nodeBounds, canvasCRF)
+                    const cpBounds = {x: cp.proxyPoint.x, y: cp.proxyPoint.y, width: proxyWidth, height: proxyHeight}
+
+                    for (let j = 0; j < nodes[i].length && !foundOverlap; j++){
+                        let b: Bounds = {x: nodes[i][j].properties.absoluteX as number, y: nodes[i][j].properties.absoluteY as number, width: nodes[i][j].bounds.width, height: nodes[i][j].bounds.height}
+                        if (isInBounds(cpBounds, b)){
+                            foundOverlap = true
+                        }
+                    }
+                }
+                if (!foundOverlap){
+                    filtered.push(cp)
+                }
+            }
+            if (filtered.length > 0){
+                crossing.crossingPoints = filtered
+                result.push(crossing)
+            }
+        }
+        return result
+    }
+
+    private getTreeDepths(currRoot: SKNode): SKNode[][] {
+        const res: SKNode[][] = []
+
+        let currentRow = [currRoot]
+        while (currentRow.length > 0){
+            res.push(currentRow)
+            let nextRow = []
+
+            for (const node of currentRow) {
+                for (const child of node.children){
+                    if(child instanceof SKNode){
+                        nextRow.push(child)
+                    }
+                }
+            }
+            currentRow = nextRow
+        }
+        return res
+    }
+
+    private getDepth(node: SKNode, root: SKNode): number{
+        if (node != root && node.parent instanceof SKNode){
+            return 1 + this.getDepth(node.parent, root)
+        }else{
+            return 0
+        }
+    }
+
+    private applyAnchors(crossings: Crossing[], canvas: Canvas) : void{
+        for (const crossing of crossings){
+            for (const cp of crossing.crossingPoints){
+                const {proxyWidth, proxyHeight} = this.transformWidthHeight(cp.nodeBounds, canvas)
+                const bounds = {x :0, y:0, width: proxyWidth, height: proxyHeight}
+                const {offsetx, offsety} = this.getAnchorOffsets(bounds, cp.side, cp.anchor)
+                cp.proxyPoint.x -= offsetx
+                cp.proxyPoint.y -= offsety
+                cp.anchor = Anchors.topLeft
+            }
+        }
+    }
+
+    private transformWidthHeight(proxyBounds: Bounds, canvas: Canvas): {proxyWidth: number, proxyHeight: number, scale: number} {
         // Calculate the scale and the resulting proxy dimensions
         // The scale is calculated such that width & height are capped to a max value
-        const proxyWidthScale = desiredSize / proxyBounds.width
-        const proxyHeightScale = desiredSize / proxyBounds.height
+
+        // Calculate size of proxies
+        const size = Math.min(canvas.width, canvas.height) * this.sizePercentage
+
+        const proxyWidthScale = size / proxyBounds.width
+        const proxyHeightScale = size / proxyBounds.height
         let scale = this.originalNodeScale ? canvas.zoom : Math.min(proxyWidthScale, proxyHeightScale)
         scale = this.capScaleToOne ? Math.min(1, scale) : scale
         const proxyWidth = proxyBounds.width * scale
         const proxyHeight = proxyBounds.height * scale
+        return {proxyWidth: proxyWidth, proxyHeight: proxyHeight, scale}
+    }
+    /**
+     * Calculates the TransformAttributes for this node's proxy, e.g. the position to place the proxy at aswell as its scale and bounds.
+     * Note that the position is pre-scaling. To get position post-scaling, divide `x` and `y` by `scale`.
+     */
+    private getTransform(point: Point, proxyBounds: Bounds, canvas: Canvas): TransformAttributes {
+        const {proxyWidth, proxyHeight, scale} = this.transformWidthHeight(proxyBounds, canvas)
 
-        // Center at middle of node
         const translated = Canvas.translateToVRF(point, canvas)
 
-        const offsetX = 0.5 * (translated.width - proxyWidth)
-        const offsetY = 0.5 * (translated.height - proxyHeight)
-        let x = translated.x + offsetX
-        let y = translated.y + offsetY
-
         // Cap proxy to canvas
-        ;({ x, y } = Canvas.capToCanvas({ x, y, width: proxyWidth, height: proxyHeight }, canvas))
+        // ;({ x, y } = Canvas.capToCanvas({ x, y, width: proxyWidth, height: proxyHeight }, canvas))
 
-        return { x, y, scale, width: proxyWidth, height: proxyHeight }
+        return { x: translated.x, y: translated.y, scale, width: proxyWidth, height: proxyHeight }
     }
 
-    // private getCorrespondingNode(
-    //     edge: SKEdge,
-    //     incoming: Boolean,
-    // ): SKNode[] {
-    //     if (incoming){
-    //         return Object.create(edge.source as SKNode)
-    //     }else{
-    //         return Object.create(edge.target as SKNode)
-    //     }
-    // }
 
     private getCrossingTransform(
         crossings: Crossing[],
-        size: number,
         canvasVRF: Canvas,
-    ): Crossing[] {
+    ): void{
         for (const crossing of crossings){
             for (const cp of crossing.crossingPoints){
                 if (cp.node){
-                    cp.nodeBounds = this.getTransform(cp.node, cp.point, size, cp.nodeBounds as Bounds, canvasVRF)
+                    cp.nodeBounds = this.getTransform(cp.proxyPoint, cp.nodeBounds, canvasVRF)
                 }
             }
         }
-        
-        return crossings
     }
 
-    private getCorrespondingCrossingNodes(
-        crossings: Crossing[],
-    ): Crossing[] {
-        for (const crossing of crossings){
-            for (const cp of crossing.crossingPoints){
-                if (cp.incoming){
-                    cp.node = Object.create(crossing.edge.source as SKNode)
-                }else{
-                    cp.node = Object.create(crossing.edge.target as SKNode)
-                }
-            }
-        }
-        return crossings
-    }
-
-    private getCorrespondingSynthesis(
-        crossings: Crossing[],
-        ctx: SKGraphModelRenderer
-    ): Crossing[] {
-        // getSynthesisProxyRenderingSingle
-        for (const crossing of crossings){
-            for (const cp of crossing.crossingPoints){
-                const {node, proxyBounds} = this.getSynthesisProxyRenderingSingle(cp.node as SKNode, ctx)
-                cp.node = node
-                cp.nodeBounds = proxyBounds
-            }
-        }
-        return crossings
-    }
 
     private getPossibleEdges(
         currRoot: SKNode,
@@ -441,10 +457,12 @@ export class ProxyView extends AbstractUIExtension {
         return proxyEdges
     }
 
+    
 
     private getCrossings(
         proxyEdges: SKEdge[],
         canvasCRF: Canvas,
+        ctx: SKGraphModelRenderer
     ): Crossing[] {
         
         const crossings: Crossing[] = []
@@ -461,14 +479,14 @@ export class ProxyView extends AbstractUIExtension {
             const pointBounds: Bounds[] = []
             const bezierPoints: Point[][] = []
 
+            const newCrossings: CrossingPoint[] = []
+
             if (rpoints.length % 3 == 1 && rpoints.length >= 4){
                 for(let i = 0; i  < Math.floor(rpoints.length/3); i++){
                     const bpoints = rpoints.slice(i*3, i*3 + 4)
-                    // pointBounds.push(Canvas.translateToCRF(getBoundsFromPoints(bpoints), canvas))
                     pointBounds.push(getBoundsFromPoints(bpoints))
                     bezierPoints.push(bpoints)
                 }
-
 
                 for (let i = 0; i < pointBounds.length; i++){
                     const pointBound = pointBounds[i]
@@ -478,42 +496,53 @@ export class ProxyView extends AbstractUIExtension {
                         const b1 = pointBound
                         const b2 = canvasCRF
 
-                        let cPoints: {point: Point, t: number}[] = []
-                        // const offsetx = (b2.width / 20)
-                        // const offsety = (b2.height / 20)
-                        const offsetx = 0
-                        const offsety = 0
+                        let cPoints: {point: Point, t: number, side: Sides}[] = []
 
                         if ((b1.x <= b2.x && b1.x + b1.width >= b2.x)) {
-                            cPoints.push(...getValueAt(b2.x + offsetx, bPoints, 0))
+                            const a = getValueAt(b2.x, bPoints, 0)
+                            const c = a.map(p => ({...p, side:Sides.W}))
+                            cPoints.push(...c)
                         }
                         if ((b1.x <= b2.x + b2.width && b1.x + b1.width >= b2.x + b2.width)) {
-                            cPoints.push(...getValueAt(b2.x + b2.width - offsetx, bPoints, 0))
+                            const a = getValueAt(b2.x + b2.width, bPoints, 0)
+                            const c = a.map(p => ({...p, side:Sides.E}))
+                            cPoints.push(...c)
                         }
                         if ((b1.y <= b2.y && b1.y + b1.height >= b2.y)) {
-                            cPoints.push(...getValueAt(b2.y + offsety, bPoints, 1))
+                            const a = getValueAt(b2.y, bPoints, 1)
+                            const c = a.map(p => ({...p, side:Sides.N}))
+                            cPoints.push(...c)
                         }
-                        if ((b1.y <= b2.y + b2.height && b1.y + b1.height >= b2.y + b2.height)) {
-                            cPoints.push(...getValueAt(b2.y + b2.height - offsety, bPoints, 1))
+                        if ((b1.y <= b2.y + b2.height && b1.y + b1.height >= b2.y + b2.height)) {//crossing south
+                            const a = getValueAt(b2.y + b2.height, bPoints, 1)
+                            const c = a.map(p => ({...p, side:Sides.S}))
+                            cPoints.push(...c)
                         }
-                        
-                        const grace_offset = 1          //TODO : besser machen. vmtl mit zur mitte Runden
+
+                        const grace_offset = 1  //TODO
                         if (cPoints.length > 0){
                             cPoints = cPoints.filter((p => (p.point.x >= b2.x - grace_offset && p.point.x <= b2.x + b2.width + grace_offset && p.point.y >= b2.y - grace_offset && p.point.y <= b2.y + b2.height + grace_offset)));
                         }
 
-                        if (cPoints.length > 0){
-                            const cross = []
+                        for (const cp of cPoints){
+                            const incoming = this.isIncoming(cp.t, canvasCRF, bPoints)
 
-                            for (const {point, t} of cPoints){
-                                const incoming = this.isIncoming(t, canvasCRF, bPoints)
-                                cross.push({point, incoming})
+                            let node
+                            if (incoming){
+                                node = Object.create(edge.source as SKNode)
+                            }else{
+                                node = Object.create(edge.target as SKNode)
                             }
-                            crossings.push({edge, crossingPoints: cross})
-                        }
+                            const {node : proxyNode, proxyBounds} = this.getSynthesisProxyRenderingSingle(node as SKNode, ctx)
+                            const proxyPoint = Object.create(cp.point) as Point
+                            const cross: CrossingPoint = {...cp, incoming: incoming, proxyPoint : proxyPoint, section: i, node: proxyNode, nodeBounds: proxyBounds, anchor: Anchors.towardsEdge}
 
+                            newCrossings.push(cross)
+                        }
                     }
                 }
+    
+                crossings.push({edge, crossingPoints: newCrossings, bezierPoints: bezierPoints, pointBounds: pointBounds})
 
             }else{
                 console.log("proxy: Edge hat nicht 3n+1 n>0 Routing Punkte")
@@ -523,6 +552,130 @@ export class ProxyView extends AbstractUIExtension {
         }
         return crossings
     }
+
+
+    private getAnchorOffsets(bounds: Bounds, side: Sides, anchor: Anchors): {offsetx: number, offsety: number}{
+        let offsetx = 0, offsety = 0
+        if (anchor == Anchors.towardsMiddle){
+            if(side == Sides.N){
+                offsetx = bounds.width * 0.5
+                offsety = bounds.height
+            }else if (side == Sides.E){
+                offsetx = 0
+                offsety = bounds.height * 0.5
+            }else if (side == Sides.S){
+                offsetx = bounds.width * 0.5
+                offsety = 0
+            }else{
+                offsetx = bounds.width
+                offsety = bounds.height * 0.5
+            }
+        }else if (anchor == Anchors.center){
+            offsetx = bounds.width * 0.5
+            offsety = bounds.height * 0.5
+        }else if(anchor == Anchors.towardsEdge){
+            if(side == Sides.N){
+                offsetx = bounds.width * 0.5
+                offsety = 0
+            }else if (side == Sides.E){
+                offsetx = bounds.width
+                offsety = bounds.height * 0.5
+            }else if (side == Sides.S){
+                offsetx = bounds.width * 0.5
+                offsety = bounds.height
+            }else{
+                offsetx = 0
+                offsety = bounds.height * 0.5
+            }
+        }
+
+        return {offsetx, offsety}
+    }
+
+
+    private updateProxyPlacementPoints(crossings : Crossing[], canvasCRF: Canvas): void{
+        let anchor = Anchors.towardsMiddle
+        let offsetMultiplier = 0
+        // if (anchor == Anchors.towardsEdge){
+        //     return crossings
+        // }else 
+        if (anchor == Anchors.towardsMiddle){
+            offsetMultiplier = 1
+        }else if (anchor == Anchors.center){
+            offsetMultiplier = 0.5
+        }
+
+
+        for (const crossing of crossings){
+            const crossingpoints = crossing.crossingPoints
+            //const crossingpointsections = [0] + crossing.crossingPoints + [crossing.pointBounds.length - 1]
+            //const end = crossingpoints[a + direction].section
+            //const direction = incoming ? 1 : -1
+            //for (let a = 1; a<crossingpoints.length-1; a++){
+            for (let a = 0; a<crossingpoints.length; a++){//all crossingPoints
+                const cross = crossingpoints[a]
+                const side = cross.side
+
+                const {proxyWidth, proxyHeight} = this.transformWidthHeight(cross.nodeBounds, canvasCRF)
+                const offsetx = proxyWidth * offsetMultiplier
+                const offsety = proxyHeight * offsetMultiplier
+
+                let direction = 1
+                let end
+                if (cross.incoming){
+                    end = a + 1 >= crossingpoints.length ? crossing.pointBounds.length - 1 : crossingpoints[a+1].section
+                }else{
+                    direction = -1
+                    end = a - 1 < 0 ? 0 : crossingpoints[a-1].section
+                }
+
+                let bound: Bounds
+                if (side == Sides.N || side == Sides.S){
+                    bound = {x: canvasCRF.x, y: canvasCRF.y + offsety, width: canvasCRF.width, height : canvasCRF.height - 2 * offsety}
+                }else{
+                    bound = {x: canvasCRF.x + offsetx, y: canvasCRF.y, width: canvasCRF.width - 2 * offsetx, height : canvasCRF.height}
+                }
+
+                for (let pos = cross.section; pos != end + direction; pos += direction){//bis zur nächsten
+                    const pointBound = crossing.pointBounds[pos]
+                    const bPoints: Point[] = crossing.bezierPoints[pos]
+
+                    if (this.isCrossingBounds(pointBound, bound)){
+                        let p
+                        if (side == Sides.N){
+                            p = getValueAt(bound.y , bPoints, 1)
+                        }else if (side == Sides.E){
+                            p = getValueAt(bound.x + bound.width, bPoints, 0)
+                        }else if (side == Sides.S){
+                            p = getValueAt(bound.y + bound.height , bPoints, 1)
+                        }else {
+                            p = getValueAt(bound.x, bPoints, 0)
+                        }
+
+
+                        const grace_offset = 1  //TODO
+                        if (p.length > 0){
+                            p = p.filter((p => (p.point.x >= bound.x - grace_offset && p.point.x <= bound.x + bound.width + grace_offset && p.point.y >= bound.y - grace_offset && p.point.y <= bound.y + bound.height + grace_offset)));
+                        }
+                        if (p.length > 0){
+                            console.log("found")
+                            crossingpoints[a].proxyPoint = p[0].point
+                            crossingpoints[a].anchor = anchor
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+
+
+
+
+
+    //get second crossing, canvas smaller is for white border
+    //if second positioning crossing exists, anchor. if not, left anchor, to screen border
 
 
     private isIncoming(t : number, bounds: Bounds, bezierPoints: Point[]): boolean{
@@ -751,29 +904,6 @@ export class ProxyView extends AbstractUIExtension {
         const fromPercent = 0.01
         this.sizePercentage = renderOptionsRegistry.getValue(ProxyViewSize) * fromPercent
 
-        switch (renderOptionsRegistry.getValue(ProxyViewDecreaseProxyClutter)) {
-            case ProxyViewDecreaseProxyClutter.CHOICE_OFF:
-                break
-            case ProxyViewDecreaseProxyClutter.CHOICE_CLUSTERING:
-                break
-            case ProxyViewDecreaseProxyClutter.CHOICE_OPACITY:
-                break
-            default:
-                console.error('unexpected case for ProxyViewDecreaseProxyClutter in proxy-view.')
-        }
-
-        switch (renderOptionsRegistry.getValue(ProxyViewEnableEdgeProxies)) {
-            case ProxyViewEnableEdgeProxies.CHOICE_OFF:
-                break
-            case ProxyViewEnableEdgeProxies.CHOICE_STRAIGHT_EDGE_ROUTING:
-                break
-            case ProxyViewEnableEdgeProxies.CHOICE_ALONG_BORDER_ROUTING:
-                break
-            default:
-                console.error('unexpected case for ProxyViewEnableEdgeProxies in proxy-view.')
-        }
-
-
         this.interactiveProxiesEnabled = renderOptionsRegistry.getValue(ProxyViewInteractiveProxies)
 
         this.titleScalingEnabled = renderOptionsRegistry.getValue(ProxyViewTitleScaling)
@@ -787,9 +917,6 @@ export class ProxyView extends AbstractUIExtension {
             this.clearRenderings()
         }
         this.useSynthesisProxyRendering = useSynthesisProxyRendering
-
-        this.showProxiesEarly = renderOptionsRegistry.getValue(ProxyViewShowProxiesEarly)
-        this.showProxiesEarlyNumber = renderOptionsRegistry.getValue(ProxyViewShowProxiesEarlyNumber)
 
         this.transparentEdges = renderOptionsRegistry.getValue(ProxyViewTransparentEdges)
         if (!this.transparentEdges && this.prevModifiedEdges.size > 0) {
