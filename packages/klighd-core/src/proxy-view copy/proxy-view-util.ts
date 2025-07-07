@@ -496,8 +496,12 @@ export function isProxy(vnode: VNode): vnode is ProxyVNode {
 export function isProxyRendering(element: SVGElement, nodeId: string): boolean {
     let currentElement: Element | null = element
     while (currentElement instanceof SVGElement) {
-        if (currentElement.id.endsWith(nodeId + PROXY_SUFFIX)) {
-            return true
+        //if (currentElement.id.endsWith(nodeId + PROXY_SUFFIX)) {
+        if (isProxyId(currentElement.id)) {
+            const id = getNodeId(currentElement.id)
+            if (id.endsWith(nodeId)) {
+                return true
+            }
         }
         currentElement = currentElement.parentElement
     }
@@ -519,6 +523,12 @@ export function getNodeId(id: string): string {
     const re = /\$proxy\d+$/
     const match = id.match(re)
     return match ? id.substring(0, id.length - match[0].length) : id
+}
+
+export function isProxyId(id: string): boolean {
+    const re = /\$proxy\d+$/
+    const match = id.match(re)
+    return match ? true : false
 }
 
 
