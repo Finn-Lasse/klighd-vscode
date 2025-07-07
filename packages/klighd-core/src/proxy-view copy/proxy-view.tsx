@@ -849,7 +849,7 @@ export class ProxyView extends AbstractUIExtension {
 
         // Get VNode
         // const id = getProxyId(node.id)
-        const id = node.id + "$proxy" + "1"//idNr
+        const id = node.id + "$proxy" + idNr
         let vnode = this.renderings.get(id)
         if (!vnode || vnode.selected !== highlight) {
             // Node hasn't been rendered yet (cache empty for this node) or the attributes don't match
