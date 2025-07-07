@@ -402,3 +402,125 @@ export class ProxyViewCapScaleToOne implements RenderOption {
 
     currentValue = ProxyViewCapScaleToOne.DEFAULT
 }
+
+/** Whether proxies that overlap nodes should be filtered. */
+export class ProxyViewFilterProxyOverlappingNode implements RenderOption {
+    static readonly ID: string = 'proxy-view-filter-proxy-overlapping-node'
+
+    static readonly NAME: string = 'Filter Proxys that overlap nodes'
+
+    static readonly DESCRIPTION: string = 'Whether proxies that overlap nodes should be filtered.'
+
+    static readonly DEFAULT: boolean = true
+
+    readonly id: string = ProxyViewFilterProxyOverlappingNode.ID
+
+    readonly name: string = ProxyViewFilterProxyOverlappingNode.NAME
+
+    readonly type: TransformationOptionType = TransformationOptionType.CHECK
+
+    readonly initialValue: boolean = ProxyViewFilterProxyOverlappingNode.DEFAULT
+
+    readonly description: string = ProxyViewFilterProxyOverlappingNode.DESCRIPTION
+
+    readonly renderCategory: string = ProxyViewDebugCategory.ID
+
+    readonly debug: boolean = true
+
+    currentValue = ProxyViewFilterProxyOverlappingNode.DEFAULT
+}
+
+/** Whether proxies with the chosen anchor should be shown with a different anchor if it can\'t be shown with the chosen anchor. */
+export class ProxyViewUseFallbackAnchor implements RenderOption {
+    static readonly ID: string = 'proxy-view-use-fallback-anchor'
+
+    static readonly NAME: string = 'Use Fallback Anchor'
+
+    static readonly DESCRIPTION: string = 'Whether proxies with the chosen anchor should be shown with a different anchor if it can\'t be shown with the chosen anchor.'
+
+    static readonly DEFAULT: boolean = false
+
+    readonly id: string = ProxyViewUseFallbackAnchor.ID
+
+    readonly name: string = ProxyViewUseFallbackAnchor.NAME
+
+    readonly type: TransformationOptionType = TransformationOptionType.CHECK
+
+    readonly initialValue: boolean = ProxyViewUseFallbackAnchor.DEFAULT
+
+    readonly description: string = ProxyViewUseFallbackAnchor.DESCRIPTION
+
+    readonly renderCategory: string = ProxyViewDebugCategory.ID
+
+    readonly debug: boolean = true
+
+    currentValue = ProxyViewFilterProxyOverlappingNode.DEFAULT
+}
+
+/** Where proxys should be placed in relation to edges. */
+export class ProxyViewAnchor implements RenderOption {
+    static readonly ID: string = 'proxy-view-anchor'
+
+    static readonly NAME: string = 'Anchor'
+
+    static readonly DESCRIPTION: string = 'Where proxys should be placed in relation to edges.'
+
+    static readonly CHOICE_TOWARDS_EDGE: string = 'Towards Screen Edge'
+
+    static readonly CHOICE_CENTERED: string = 'Centered'
+
+    static readonly CHOICE_TOWARDS_MIDDLE: string = 'Towards Screen Middle'
+
+    static readonly DEFAULT: string = ProxyViewAnchor.CHOICE_TOWARDS_MIDDLE
+
+    static readonly CHOICES: string[] = [
+        ProxyViewAnchor.CHOICE_TOWARDS_EDGE,
+        ProxyViewAnchor.CHOICE_CENTERED,
+        ProxyViewAnchor.CHOICE_TOWARDS_MIDDLE,
+    ]
+
+    readonly id: string = ProxyViewAnchor.ID
+
+    readonly name: string = ProxyViewAnchor.NAME
+
+    readonly type: TransformationOptionType = TransformationOptionType.CHOICE
+
+    readonly initialValue: string = ProxyViewAnchor.DEFAULT
+
+    readonly description: string = ProxyViewAnchor.DESCRIPTION
+
+    readonly renderCategory: string = ProxyViewCategory.ID
+
+    readonly values: string[] = ProxyViewAnchor.CHOICES
+
+    readonly debug: boolean = true
+
+    currentValue = ProxyViewAnchor.DEFAULT
+}
+
+/** Whether proxies should be shown on a border, hiding parts of the diagram. */
+export class ProxyViewReservedBorder implements RenderOption {
+    static readonly ID: string = 'proxy-view-reserved-border'
+
+    static readonly NAME: string = 'Use Reserved Border'
+
+    static readonly DESCRIPTION: string = 'Whether proxies should be shown on a border, hiding parts of the diagram.'
+
+    static readonly DEFAULT: boolean = false
+
+    readonly id: string = ProxyViewReservedBorder.ID
+
+    readonly name: string = ProxyViewReservedBorder.NAME
+
+    readonly type: TransformationOptionType = TransformationOptionType.CHECK
+
+    readonly initialValue: boolean = ProxyViewReservedBorder.DEFAULT
+
+    readonly description: string = ProxyViewReservedBorder.DESCRIPTION
+
+    readonly renderCategory: string = ProxyViewDebugCategory.ID
+
+    readonly debug: boolean = true
+
+    currentValue = ProxyViewFilterProxyOverlappingNode.DEFAULT
+}

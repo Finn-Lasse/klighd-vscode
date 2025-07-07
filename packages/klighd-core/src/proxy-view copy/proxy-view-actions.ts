@@ -41,6 +41,7 @@ import {
     ProxyViewCategory,
     ProxyViewDebugCategory,
     ProxyViewEnabled,
+    ProxyViewFilterProxyOverlappingNode,
     ProxyViewHighlightSelected,
     ProxyViewInteractiveProxies,
     ProxyViewOpacityBySelected,
@@ -50,6 +51,9 @@ import {
     ProxyViewTransparentEdges,
     ProxyViewUseDetailLevel,
     ProxyViewUseSynthesisProxyRendering,
+    ProxyViewAnchor,
+    ProxyViewUseFallbackAnchor,
+    ProxyViewReservedBorder
 } from './proxy-view-options'
 import { getNodeId, isProxyRendering } from './proxy-view-util'
 /* global MouseEvent, SVGElement */
@@ -170,6 +174,11 @@ export class ProxyViewActionHandler extends MouseListener implements IActionHand
             ProxyViewTransparentEdges,
             ProxyViewOriginalNodeScale,
             ProxyViewCapScaleToOne,
+            ProxyViewFilterProxyOverlappingNode,
+            ProxyViewAnchor,
+            ProxyViewUseFallbackAnchor,
+            ProxyViewReservedBorder
+
         )
     }
 

@@ -159,8 +159,8 @@ export enum Sides {
 
 export enum Anchors {
 	towardsMiddle = "towardsMiddle",
-    center = "center",
-    towardsEdge = "towardsEdge",
+  center = "center",
+  towardsEdge = "towardsEdge",
 	topLeft = "topLeft"
 }
 

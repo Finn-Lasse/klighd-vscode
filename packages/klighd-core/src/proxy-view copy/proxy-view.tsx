@@ -16,13 +16,13 @@
  * SPDX-License-Identifier: EPL-2.0
  */
 
-/** @jsx html */
+/** @jsx svg */
 import { KGraphData } from '@kieler/klighd-interactive/lib/constraint-classes'
 import { inject, injectable, postConstruct } from 'inversify'
 import { VNode } from 'snabbdom'
 import {
     AbstractUIExtension,
-    html, // eslint-disable-line @typescript-eslint/no-unused-vars
+    svg, // eslint-disable-line @typescript-eslint/no-unused-vars
     IActionDispatcher,
     isThunk,
     MouseTool,
@@ -43,6 +43,7 @@ import { SendProxyViewAction, ShowProxyViewAction } from './proxy-view-actions'
 import {
     ProxyViewCapScaleToOne,
     ProxyViewEnabled,
+    ProxyViewFilterProxyOverlappingNode,
     ProxyViewHighlightSelected,
     ProxyViewInteractiveProxies,
     ProxyViewOriginalNodeScale,
@@ -50,6 +51,9 @@ import {
     ProxyViewTitleScaling,
     ProxyViewTransparentEdges,
     ProxyViewUseSynthesisProxyRendering,
+    ProxyViewUseFallbackAnchor,
+    ProxyViewAnchor,
+    ProxyViewReservedBorder
 } from './proxy-view-options'
 import {
     Canvas,
@@ -73,7 +77,7 @@ import{
     Sides,
     Anchors
 } from './proxy-view-bezier'
-/* global document, HTMLElement, MouseEvent */
+
 
 /** A UIExtension which adds a proxy-view to the Sprotty container. */
 @injectable()
@@ -132,6 +136,14 @@ export class ProxyView extends AbstractUIExtension {
 
     /** Whether the proxies should be click-through. */
     private clickThrough: boolean
+
+    private filterOverlaps: boolean
+
+    private proxyAnchor: Anchors
+
+    private useFallbackAnchor: boolean
+
+    private proxyBorder: boolean
 
     /**
      * Stores the previous opacity of edges whose opacity was modified.
@@ -239,8 +251,12 @@ export class ProxyView extends AbstractUIExtension {
 
         const canvasWidth = model.canvasBounds.width
         const canvasHeight = model.canvasBounds.height
-        const canvas = Canvas.of(model, ctx.viewport)
         const root = model.children[0] as SKNode
+
+        let canvas = Canvas.of(model, ctx.viewport)
+        let border: VNode[]
+        ({canvas, border} = this.proxyBorder ? this.applyProxyBorder(canvas) : {canvas, border: []})
+
         // Actually update the document
         this.currHTMLRoot = this.patcher(
             this.currHTMLRoot,
@@ -251,9 +267,27 @@ export class ProxyView extends AbstractUIExtension {
                     height: `${canvasHeight}`,
                 }}
             >
+
+                {...border}
                 {...this.createAllProxies(root, ctx, canvas)}
+                
             </svg>
         )
+    }
+
+    private applyProxyBorder(canvas: Canvas) : {canvas:Canvas, border: VNode[]} {
+        const canvasWidth = canvas.width
+        const canvasHeight = canvas.height
+        const offset = Math.min(canvasWidth, canvasHeight) * this.sizePercentage 
+        
+        canvas = Canvas.offsetCanvas(canvas, offset)
+        const border = [
+            <rect x="0" y="0" width={offset} height={canvasHeight} fill="lightgray"/>,
+            <rect x={canvasWidth-offset} y="0" width={offset} height={canvasHeight} fill="lightgray"/>,
+            <rect x="0" y="0" width={canvasWidth} height={offset} fill="lightgray"/>,
+            <rect x="0" y={canvasHeight-offset} width={canvasWidth} height={offset} fill="lightgray"/>
+        ]
+        return {canvas, border}
     }
 
     /** Returns the proxy rendering for all of currRoot's off-screen children and applies logic, e.g. clustering. */
@@ -272,11 +306,11 @@ export class ProxyView extends AbstractUIExtension {
 
         const crossings = this.getCrossings(crossingEdges, canvasCRF, ctx)
 
-        this.updateProxyPlacementPoints(crossings, canvasCRF)
+        const updatedCrossings = this.updateProxyPlacementPoints(crossings, canvasCRF)
  
-        this.applyAnchors(crossings, canvasCRF)
+        this.applyAnchors(updatedCrossings, canvasCRF)
 
-        const filteredOverlaps = this.filterOverlappingWithNodes(crossings, root, canvasCRF)
+        const filteredOverlaps = this.filterOverlappingWithNodes(updatedCrossings, root, canvasCRF)
 
         this.getCrossingTransform(filteredOverlaps, canvasVRF)
 
@@ -309,43 +343,47 @@ export class ProxyView extends AbstractUIExtension {
 
 
     private filterOverlappingWithNodes(crossings: Crossing[], root: SKNode, canvasCRF: Canvas): Crossing[]{
-        const nodes = this.getTreeDepths(root)
-        const result = []
+        if(this.filterOverlaps && crossings.length > 0 && !this.proxyBorder){
+            const result = []
+            const nodes = this.getTreeDepths(root)
 
-        for (const crossing of crossings){
-            const edge = crossing.edge
-            let depth
-            if (edge.target instanceof SKNode && edge.source instanceof SKNode){
-                const depthTarget = this.getDepth(edge.target, root)
-                const depthSource = this.getDepth(edge.source, root)
-                depth = Math.max(depthSource, depthTarget)
-            }
+            for (const crossing of crossings){
+                const edge = crossing.edge
+                let depth
+                if (edge.target instanceof SKNode && edge.source instanceof SKNode){
+                    const depthTarget = this.getDepth(edge.target, root)
+                    const depthSource = this.getDepth(edge.source, root)
+                    depth = Math.max(depthSource, depthTarget)
+                }
 
-            const filtered = []
-            for (const cp of crossing.crossingPoints){
-                depth ??= this.getDepth(cp.node, root)
-                let foundOverlap = false
-                for (let i = depth; i < nodes.length && !foundOverlap; i++){
-                    const {proxyWidth, proxyHeight} = this.transformWidthHeight(cp.nodeBounds, canvasCRF)
-                    const cpBounds = {x: cp.proxyPoint.x, y: cp.proxyPoint.y, width: proxyWidth, height: proxyHeight}
+                const filtered = []
+                for (const cp of crossing.crossingPoints){
+                    depth ??= this.getDepth(cp.node, root)
+                    let foundOverlap = false
+                    for (let i = depth; i < nodes.length && !foundOverlap; i++){
+                        const {proxyWidth, proxyHeight} = this.transformWidthHeight(cp.nodeBounds, canvasCRF)
+                        const cpBounds = {x: cp.proxyPoint.x, y: cp.proxyPoint.y, width: proxyWidth, height: proxyHeight}
 
-                    for (let j = 0; j < nodes[i].length && !foundOverlap; j++){
-                        let b: Bounds = {x: nodes[i][j].properties.absoluteX as number, y: nodes[i][j].properties.absoluteY as number, width: nodes[i][j].bounds.width, height: nodes[i][j].bounds.height}
-                        if (isInBounds(cpBounds, b)){
-                            foundOverlap = true
+                        for (let j = 0; j < nodes[i].length && !foundOverlap; j++){
+                            let b: Bounds = {x: nodes[i][j].properties.absoluteX as number, y: nodes[i][j].properties.absoluteY as number, width: nodes[i][j].bounds.width, height: nodes[i][j].bounds.height}
+                            if (isInBounds(cpBounds, b)){
+                                foundOverlap = true
+                            }
                         }
                     }
+                    if (!foundOverlap){
+                        filtered.push(cp)
+                    }
                 }
-                if (!foundOverlap){
-                    filtered.push(cp)
+                if (filtered.length > 0){
+                    crossing.crossingPoints = filtered
+                    result.push(crossing)
                 }
             }
-            if (filtered.length > 0){
-                crossing.crossingPoints = filtered
-                result.push(crossing)
-            }
+            return result
         }
-        return result
+       
+        return crossings
     }
 
     private getTreeDepths(currRoot: SKNode): SKNode[][] {
@@ -394,7 +432,11 @@ export class ProxyView extends AbstractUIExtension {
         // The scale is calculated such that width & height are capped to a max value
 
         // Calculate size of proxies
-        const size = Math.min(canvas.width, canvas.height) * this.sizePercentage
+        let size = Math.min(canvas.width, canvas.height) * this.sizePercentage
+
+        if (this.proxyBorder) {
+            size = size * (1 / (1 - 2 * this.sizePercentage))
+        }
 
         const proxyWidthScale = size / proxyBounds.width
         const proxyHeightScale = size / proxyBounds.height
@@ -535,8 +577,8 @@ export class ProxyView extends AbstractUIExtension {
                             }
                             const {node : proxyNode, proxyBounds} = this.getSynthesisProxyRenderingSingle(node as SKNode, ctx)
                             const proxyPoint = Object.create(cp.point) as Point
-                            const cross: CrossingPoint = {...cp, incoming: incoming, proxyPoint : proxyPoint, section: i, node: proxyNode, nodeBounds: proxyBounds, anchor: Anchors.towardsEdge}
 
+                            const cross: CrossingPoint = {...cp, incoming: incoming, proxyPoint : proxyPoint, section: i, node: proxyNode, nodeBounds: proxyBounds, anchor: Anchors.towardsEdge}
                             newCrossings.push(cross)
                         }
                     }
@@ -593,20 +635,29 @@ export class ProxyView extends AbstractUIExtension {
     }
 
 
-    private updateProxyPlacementPoints(crossings : Crossing[], canvasCRF: Canvas): void{
-        let anchor = Anchors.towardsMiddle
+    private updateProxyPlacementPoints(crossings : Crossing[], canvasCRF: Canvas): Crossing[]{
+        if(this.proxyBorder){
+            for (const crossing of crossings){
+                for (const cp of crossing.crossingPoints){
+                    cp.anchor = Anchors.towardsMiddle
+                }
+            }
+            return crossings
+        }
+
         let offsetMultiplier = 0
-        // if (anchor == Anchors.towardsEdge){
-        //     return crossings
-        // }else 
-        if (anchor == Anchors.towardsMiddle){
+        const anchor = this.proxyAnchor
+        if (anchor == Anchors.towardsEdge){
+            return crossings
+        }else if (this.proxyAnchor == Anchors.towardsMiddle){
             offsetMultiplier = 1
-        }else if (anchor == Anchors.center){
+        }else if (this.proxyAnchor == Anchors.center){
             offsetMultiplier = 0.5
         }
 
-
+        const updatedCrossings: Crossing[] = []
         for (const crossing of crossings){
+            const updatedCrossingPoints: CrossingPoint[] = []
             const crossingpoints = crossing.crossingPoints
             //const crossingpointsections = [0] + crossing.crossingPoints + [crossing.pointBounds.length - 1]
             //const end = crossingpoints[a + direction].section
@@ -658,24 +709,28 @@ export class ProxyView extends AbstractUIExtension {
                             p = p.filter((p => (p.point.x >= bound.x - grace_offset && p.point.x <= bound.x + bound.width + grace_offset && p.point.y >= bound.y - grace_offset && p.point.y <= bound.y + bound.height + grace_offset)));
                         }
                         if (p.length > 0){
-                            console.log("found")
-                            crossingpoints[a].proxyPoint = p[0].point
-                            crossingpoints[a].anchor = anchor
+                            cross.proxyPoint = p[0].point
+                            cross.anchor = this.proxyAnchor
+
+                            updatedCrossingPoints.push(cross)
                             break
                         }
                     }
                 }
             }
+            if(updatedCrossingPoints.length > 0) {
+                crossing.crossingPoints = updatedCrossingPoints
+                updatedCrossings.push(crossing)
+            }
         }
+
+        return this.useFallbackAnchor ? crossings : updatedCrossings
 
     }
 
 
 
 
-
-    //get second crossing, canvas smaller is for white border
-    //if second positioning crossing exists, anchor. if not, left anchor, to screen border
 
 
     private isIncoming(t : number, bounds: Bounds, bezierPoints: Point[]): boolean{
@@ -794,7 +849,7 @@ export class ProxyView extends AbstractUIExtension {
 
         // Get VNode
         // const id = getProxyId(node.id)
-        const id = node.id + "$proxy" + idNr
+        const id = node.id + "$proxy" + "1"//idNr
         let vnode = this.renderings.get(id)
         if (!vnode || vnode.selected !== highlight) {
             // Node hasn't been rendered yet (cache empty for this node) or the attributes don't match
@@ -904,9 +959,21 @@ export class ProxyView extends AbstractUIExtension {
         const fromPercent = 0.01
         this.sizePercentage = renderOptionsRegistry.getValue(ProxyViewSize) * fromPercent
 
+        this.filterOverlaps = renderOptionsRegistry.getValue(ProxyViewFilterProxyOverlappingNode)
+
         this.interactiveProxiesEnabled = renderOptionsRegistry.getValue(ProxyViewInteractiveProxies)
 
         this.titleScalingEnabled = renderOptionsRegistry.getValue(ProxyViewTitleScaling)
+
+        this.useFallbackAnchor = renderOptionsRegistry.getValue(ProxyViewUseFallbackAnchor)
+        this.proxyBorder = renderOptionsRegistry.getValue(ProxyViewReservedBorder)
+
+        const proxyAnchor = renderOptionsRegistry.getValue(ProxyViewAnchor)
+        switch(proxyAnchor){
+            case "Centered":{this.proxyAnchor = Anchors.center; break}
+            case "Towards Screen Edge":{this.proxyAnchor = Anchors.towardsEdge; break}
+            case "Towards Screen Middle":{this.proxyAnchor = Anchors.towardsMiddle; break}
+        }
 
         // Debug
         this.highlightSelected = renderOptionsRegistry.getValue(ProxyViewHighlightSelected)
